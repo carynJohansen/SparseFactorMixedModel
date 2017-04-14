@@ -1,8 +1,4 @@
-#library(git2r)
-#library(devtools)
-my_local_library = '/usr/local/lib/R/3.3/site-library/'
-BSFG_path = 'https://github.com/deruncie/SparseFactorMixedModel'
-withr::with_libpaths(my_local_library,install_git(BSFG_path,branch = 'develop',subdir = 'BSFG'))
+
 
 
 library(microbenchmark)

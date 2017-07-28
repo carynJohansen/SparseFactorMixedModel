@@ -1,6 +1,8 @@
 library(microbenchmark)
 library(MCMCpack)
 library(BSFG)
+library(cowplot)
+library(splines)
 
 # set the directory to the location of the setup.RData or setup.mat file
 
@@ -41,7 +43,11 @@ priors = list(
   delta_2   = list(shape = 3, rate = 1),
   Lambda_df = 3,
   B_df      = 3,
-  B_F_df    = 3
+  B_F_df    = 3,
+  # h2_priors_resids_fun = function(h2s) pmax(pmin(ddirichlet(c(h2s,1-sum(h2s)),rep(2,length(h2s)+1)),10),1e-10),
+  # h2_priors_factors_fun = function(h2s) ifelse(h2s == 0,run_parameters$h2_divisions,run_parameters$h2_divisions/(run_parameters$h2_divisions-1))
+  h2_priors_resids = 1,
+  h2_priors_factors = 1
 )
 
 
@@ -51,32 +57,38 @@ print('Initializing')
 load('../setup.RData')
 
 
-data_model_parameters = list(
+# data_model_parameters = list(
+#   observations = setup$observations,
+#   df = 40,
+#   # degree=6,
+#   intercept = TRUE,
+#   individual_model = ~SPLINE,
+#   resid_Y_prec_shape = 2,
+#   resid_Y_prec_rate = 1
+# )
+setup$observations$A = setup$observations$Y
+setup$observations$B = setup$observations$Y
+setup$observations$C = setup$observations$Y
+observation_setup = list(
+  observation_model = regression_model,
   observations = setup$observations,
-  df = 40,
-  # degree=6,
-  intercept = TRUE,
-  individual_model = ~SPLINE,
+  # individual_model = Y~ poly(covariate,4)+bs(covariate,df=5,intercept=T)+bs(covariate,df=20,intercept=T)+bs(covariate,df=40,intercept=F),
+  individual_model = cbind(A,B,C)~poly(covariate,4)+bs(covariate,df=5,intercept=T)+bs(covariate,df=20,intercept=T)+bs(covariate,df=40,intercept=F),
   resid_Y_prec_shape = 2,
   resid_Y_prec_rate = 1
 )
 
+
+setup$data$ID = unique(setup$observations$ID)
 # options(error=recover)
-BSFG_state = with(setup,BSFG_init(observations$Y, model=~X2+(1|animal), data, #factor_model_fixed = ~1,
+BSFG_state = with(setup,BSFG_init(observation_setup, model=~X2+(1|animal), data, #factor_model_fixed = ~1,
                                   priors=priors,run_parameters=run_parameters,K_mats = list(animal = K),
-                                  data_model = bs_model, data_model_parameters = data_model_parameters,
                                   posteriorSample_params = c('Lambda','U_F','F','delta','tot_F_prec','F_h2','tot_Eta_prec','resid_h2', 'B', 'B_F', 'tau_B','tau_B_F','cis_effects','U_R'),
                                   posteriorMean_params = c()
                                   ))
 BSFG_state$current_state$F_h2
-
-h2_divisions = run_parameters$h2_divisions
-BSFG_state$priors$h2_priors_resids = with(BSFG_state$data_matrices, sapply(1:ncol(h2s_matrix),function(x) {
-  h2s = h2s_matrix[,x]
-  pmax(pmin(ddirichlet(c(h2s,1-sum(h2s)),rep(2,length(h2s)+1)),10),1e-10)
-}))
-BSFG_state$priors$h2_priors_resids = BSFG_state$priors$h2_priors_resids/sum(BSFG_state$priors$h2_priors_resids)
-BSFG_state$priors$h2_priors_factors = c(h2_divisions-1,rep(1,h2_divisions-1))/(2*(h2_divisions-1))
+BSFG_state$priors$h2_priors_resids
+BSFG_state$priors$h2_priors_factors
 
 save(BSFG_state,file="BSFG_state.RData")
 
@@ -103,25 +115,28 @@ for(i  in 1:70) {
     BSFG_state = save_posterior_chunk(BSFG_state)
     print(BSFG_state)
     plot(BSFG_state)
-    plot(BSFG_state$data_matrices$Y,BSFG_state$current_state$Y_fitted);abline(0,1)
+    plot(BSFG_state$current_state$Y,BSFG_state$current_state$Y_fitted);abline(0,1)
 }
 
 Posterior = reload_Posterior(BSFG_state)
 data = setup$observations
-data$Y_fitted = apply(Posterior$Y_fitted,c(2,3),mean)
-data$Y_fitted_low = apply(Posterior$Y_fitted,c(2,3),function(x) HPDinterval(mcmc(x))[1])
-data$Y_fitted_high = apply(Posterior$Y_fitted,c(2,3),function(x) HPDinterval(mcmc(x))[2])
+trait = 2
+data$Y_fitted = colMeans(Posterior$Y_fitted[,,trait])
+data$Y_fitted_low = apply(Posterior$Y_fitted[,,trait],2,function(x) HPDinterval(mcmc(x))[1])
+data$Y_fitted_high = apply(Posterior$Y_fitted[,,trait],2,function(x) HPDinterval(mcmc(x))[2])
 # data$Y_fitted = BSFG_state$current_state$Y_fitted
 ggplot(data,aes(x=covariate,y=Y)) + geom_line(aes(group = ID)) + geom_line(aes(y=Y_fitted,group=ID),color ='red')
 ggplot(subset(data,ID %in% c(1,2,21,22)),aes(x=covariate,y=Y)) + geom_ribbon(aes(ymin = Y_fitted_low,ymax = Y_fitted_high,group = ID),alpha = 0.2) + geom_line(aes(group = ID)) + geom_line(aes(y=Y_fitted,group=ID),color ='red')
 
-
+newx = seq(1,60,length=100)
+new_MM = model.matrix(BSFG_state$current_state$Terms,data.frame(covariate=newx))
 
 
 
 BSFG_state$Posterior = reload_Posterior(BSFG_state)
-plot(BSFG_state$Posterior$Eta,setup$Eta);abline(0,1)
-setup$observations$Y_fitted = sapply(1:nrow(setup$observations),function(i) predict(BSFG_state$current_state$coefficients,newx = setup$observations$covariate[i]) %*% BSFG_state$Posterior$Eta[setup$observations$ID[i],])
+plot(apply(BSFG_state$Posterior$Eta,c(2,3),mean),setup$Eta);abline(0,1)
+# setup$observations$Y_fitted = sapply(1:nrow(setup$observations),function(i) predict(BSFG_state$current_state$coefficients,newx = setup$observations$covariate[i]) %*% BSFG_state$Posterior$Eta[setup$observations$ID[i],])
+setup$observations$Y_fitted = sapply(1:nrow(setup$observations),function(i) model.matrix(BSFG_state$current_state$Terms,data.frame(covariate=setup$observations$covariate[i])) %*% colMeans(BSFG_state$Posterior$Eta[,setup$observations$ID[i],]))
 with(setup$observations,plot(Y,Y_fitted));abline(0,1)
 plot(c(with(BSFG_state$current_state,U_F %*% t(Lambda))),with(setup,c(as.matrix(U_F %*% t(error_factor_Lambda)))));abline(0,1)
 plot(c(with(BSFG_state$current_state,U_R + U_F %*% t(Lambda))),with(setup,c(as.matrix(U_R + U_F %*% t(error_factor_Lambda)))));abline(0,1)
@@ -136,7 +151,7 @@ Posterior_P = aperm(array(sapply(1:Posterior$total_samples,function(i) {
     Lambda[i,,] %*% t(Lambda[i,,]) + diag(1/tot_Eta_prec[i,,])
   })
 }),dim = c(rep(dim(Posterior$Lambda)[2],2),Posterior$total_samples)),c(3,1,2))
-dimnames(Posterior_P)[2:3] = dimnames(Posterior$Eta)[2]
+dimnames(Posterior_P)[2:3] = dimnames(Posterior$Eta)[3]
 
 library(heatmap3)
 i = 1:dim(Posterior_P)[2]
@@ -148,7 +163,7 @@ Posterior_G = aperm(array(sapply(1:Posterior$total_samples,function(i) {
     Lambda[i,,] %*% diag(F_h2[i,,]) %*% t(Lambda[i,,]) + diag(resid_h2[i,,]/tot_Eta_prec[i,,])
   })
 }),dim = c(rep(dim(Posterior$Lambda)[2],2),Posterior$total_samples)),c(3,1,2))
-dimnames(Posterior_G)[2:3] = dimnames(Posterior$Eta)[2]
+dimnames(Posterior_G)[2:3] = dimnames(Posterior$Eta)[3]
 heatmap3(cov2cor(apply(Posterior_G,c(2,3),mean))[i,i]^2,Rowv = NA,Colv=NA)
 trace_plot(Posterior_G[,i,6])
 boxplot(Posterior_G[,i[2:10],6]);abline(h=0)

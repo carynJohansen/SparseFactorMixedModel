@@ -29,7 +29,8 @@ trace_plot_h2s = function(F_h2_samples, n_factors = 8, device = NULL){
   cols = 2*ceiling(n_factors / rows)
   par(mfrow=c(rows,cols))
 
-  for(k in 1:min(n_factors,dim(F_h2_samples)[3])){
+  # for(k in 1:min(n_factors,dim(F_h2_samples)[3])){
+  for(k in 1:dim(F_h2_samples)[3]){
     trace_plot(as.matrix(F_h2_samples[,,k,drop=F]),main = sprintf('Factor %d h2s',k),ylim = c(0,1))
     hist(F_h2_samples[,1,k],breaks=seq(0,1,length=100),xlim = c(-0.1,1),main = sprintf('Factor %d',k))
     if(dim(F_h2_samples)[2] > 1) {
@@ -40,7 +41,7 @@ trace_plot_h2s = function(F_h2_samples, n_factors = 8, device = NULL){
   }
 }
 
-trace_plot_Lambda = function(Lambda, n_factors = 16, device = NULL){
+trace_plot_Lambda = function(Lambda, n_factors = 16, device = NULL,main = 'Lambda'){
   if(!is.null(device)) {
     set_device(device)
   }
@@ -49,10 +50,24 @@ trace_plot_Lambda = function(Lambda, n_factors = 16, device = NULL){
   cols = ceiling(n_factors / rows)
   par(mfrow=c(rows,cols))
 
-  for(k in 1:min(n_factors,dim(Lambda)[3])){
+  # for(k in 1:min(n_factors,dim(Lambda)[3])){
+  for(k in 1:dim(Lambda)[3]){
     o = order(-abs(colMeans(Lambda[,,k])))
-    traces = Lambda[,o[1:5],k]
-    trace_plot(traces,main = sprintf('Factor %d lambdas',k))
+    o = o[1:min(5,length(o))]
+    traces = Lambda[,o,k]
+    trace_plot(traces,main = sprintf('Factor %d %s',k,main))
+    abline(h=0)
+  }
+}
+
+boxplot_Bs = function(B,main = ''){
+  k = dim(B)[3]
+  b = dim(B)[2]
+  par(mfrow=c(3,3))
+  for(i in 1:min(27,k)) {
+    data = B[,,i]
+    ylim = range(c(0,data))
+    boxplot(data,ylim=ylim,main = sprintf('%s %d',main,i),outpch=NA,boxlty=0,whisklty=1,staplelty=0)
     abline(h=0)
   }
 }
@@ -101,11 +116,15 @@ plot_current_state_simulation = function(BSFG_state, device = NULL){
   run_variables = BSFG_state$run_variables
 
   current_state = within(BSFG_state$current_state,{
+    U_R = as.matrix(BSFG_state$data_matrices$RE_L %*% U_R)
+    U_F = as.matrix(BSFG_state$data_matrices$RE_L %*% U_F)
     # transform variables so that the variance of each column of F is 1.
     F_var = 1/tot_F_prec
     U_F = sweep(U_F,2,sqrt(F_var),'/')
+    B_F = sweep(B_F,2,sqrt(F_var),'/')
     F = sweep(F,2,sqrt(F_var),'/')
     Lambda = sweep(Lambda,2,sqrt(F_var),'*')
+    tauh[] = tauh * tot_F_prec
   })
 
   Lambda = current_state$Lambda
@@ -141,19 +160,19 @@ plot_current_state_simulation = function(BSFG_state, device = NULL){
   if(dim(setup$B)[1] > 1) {
     B = BSFG_state$current_state$B
     B_factor = BSFG_state$current_state$B_F   %*% t(BSFG_state$current_state$Lambda)
-    plot(c(B),c(setup$B))
+    try({plot(c(B),c(setup$B))},silent = TRUE)
     abline(0,1)
     if(dim(B_factor)[1] > 1) {
-      plot(c(B_factor),c(setup$B_F %*% t(setup$error_factor_Lambda)))
+      try({plot(c(B_factor),c(setup$B_F %*% t(setup$error_factor_Lambda)))},silent = TRUE)
       abline(0,1)
-      xlim = ylim = range(c(B[-1,],B_factor))
-      plot(c(B_factor),c(B[-1,]),xlim = xlim,ylim=ylim);abline(0,1)
+      xlim = ylim = range(c(B,B_factor))
+      try({plot(c(B_factor),c(B),xlim = xlim,ylim=ylim);abline(0,1)},silent = TRUE)
     }
   }
 
   # cis_effects
   if(length(setup$cis_effects) > 0 &&  length(setup$cis_effects) == length(BSFG_state$current_state$cis_effects)){
-    plot(setup$cis_effects,BSFG_state$current_state$cis_effects);abline(0,1)
+    try({plot(setup$cis_effects,BSFG_state$current_state$cis_effects);abline(0,1)},silent = TRUE)
   }
 }
 
@@ -222,23 +241,24 @@ plot_posterior_simulation = function(BSFG_state, device = NULL){
 
   if(dim(setup$B)[1] > 1) {
     B_mean = apply(Posterior$B,c(2,3),mean)
-    plot(c(B_mean),c(setup$B))
+    try({plot(c(B_mean),c(setup$B))},silent = TRUE)
     abline(0,1)
     if(!is.null(setup$B_F) & ncol(BSFG_state$data_matrices$X_F) == nrow(setup$B_F)){
       B_factor_mean = with(c(Posterior,BSFG_state$data_matrices), {
         if(ncol(X_F) == 0) return(rep(0,dim(Lambda)[1]))
         matrix(rowMeans(sapply(1:total_samples,function(i) B_F[i,,] %*% t(Lambda[i,,]))),nrow = ncol(X_F))
       })
-      plot(c(B_factor_mean),c(setup$B_F %*% t(setup$error_factor_Lambda)))
-      abline(0,1)
+      try({plot(c(B_factor_mean),c(setup$B_F %*% t(setup$error_factor_Lambda)));abline(0,1)},silent = TRUE)
       xlim = ylim = range(c(B_mean[-1,],B_factor_mean))
-      plot(c(B_factor_mean),c(B_mean[-1,]),xlim = xlim,ylim=ylim);abline(0,1)
+      try({plot(c(B_factor_mean),c(B_mean),xlim = xlim,ylim=ylim);abline(0,1)},silent = TRUE)
       B_f_HPD = HPDinterval(mcmc(Posterior$B_F[,1,]))
       B_f_mean = colMeans(Posterior$B_F[,1,])
 
-      plot(1:length(B_f_mean),B_f_mean,xlim = c(1,length(B_f_mean)),ylim = range(B_f_HPD),xlab = '',main = 'Posterior B_F')
-      arrows(seq_along(B_f_mean),B_f_HPD[,1],seq_along(B_f_mean),B_f_HPD[,2],length=0)
-      abline(h=0)
+      try({
+        plot(1:length(B_f_mean),B_f_mean,xlim = c(1,length(B_f_mean)),ylim = range(B_f_HPD),xlab = '',main = 'Posterior B_F')
+        arrows(seq_along(B_f_mean),B_f_HPD[,1],seq_along(B_f_mean),B_f_HPD[,2],length=0)
+        abline(h=0)
+      },silent = TRUE)
     }
   }
 }
@@ -263,40 +283,10 @@ plot_diagnostics = function(BSFG_state){
   if(BSFG_state$Posterior$total_samples > 0) {
     trace_plot_h2s(load_posterior_param(BSFG_state,'F_h2'))
     trace_plot_Lambda(load_posterior_param(BSFG_state,'Lambda'))
+    try({trace_plot_Lambda(load_posterior_param(BSFG_state,'B_F'),main='B_F')},silent=T)
+    try({boxplot_Bs(load_posterior_param(BSFG_state,'B'),'B')},silent=T)
   }
 }
 
-
-#' Calculates posterior means of specific parameters of a BSFG model
-#'
-#' @param BSFG_state a BSFG_state object
-#' @param parameter the parameter to return the posterior means
-#' @param samples (optionally) a vector of sample indices (for example, to exclude samples prior
-#'    to convergence, or to thin saved samples)
-#' @return matrix of posterior means of same dimension as parameter in current_state
-get_posteriorMean = function(BSFG_state,parameter = c('Lambda','F','U_F','F_h2','B','B_F'),samples = NULL){
-  post_samples = load_posterior_param(BSFG_state,parameter)
-  if(!is.null(samples)) post_samples = post_samples[samples,,]
-  return(apply(post_samples,c(2,3),mean))
-}
-
-
-#' Calculates HPDintervals for the specified parameter of a BSFG model
-#'
-#' @param BSFG_state a BSFG_state object
-#' @param parameter the parameter to return the posterior means
-#' @param samples (optionally) a vector of sample indices (for example, to exclude samples prior
-#'    to convergence, or to thin saved samples)
-#' @return array of HPDintervals. The dimensions correspond to the dimensions in Posterior
-#'     (the first dimension holds the lower and upper bounds, the other two the matrix of parameters)
-HPDinterval.BSFG_state = function(obj,prob,parameter = 'F_h2',samples = NULL){
-  post_samples = load_posterior_param(obj,parameter)
-  if(!is.null(samples)) post_samples = post_samples[samples,,]
-  intervals = apply(post_samples,3,function(x) HPDinterval(mcmc(x)))
-  dims = dim(post_samples)[-1]
-  intervals = array(intervals,dim = c(dims[1],2,dims[2]))
-  intervals = aperm(intervals,c(2,1,3))
-  return(intervals)
-}
 
 

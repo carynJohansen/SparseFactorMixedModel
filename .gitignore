@@ -7,9 +7,11 @@ sourceCpp*
 .Rhistory
 *.Rapp.history
 *.RData
+*.rds
 *.log
 *.synctex.gz
 *.aux
 *.out
 *.toc
 *plots.pdf
+Manuscript*

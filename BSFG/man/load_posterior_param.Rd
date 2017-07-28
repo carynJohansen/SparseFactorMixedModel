@@ -4,12 +4,14 @@
 \alias{load_posterior_param}
 \title{load the posterior samples of a single parameter from all saved chunks}
 \usage{
-load_posterior_param(BSFG_state, param)
+load_posterior_param(BSFG_state, param, chunks = NULL)
 }
 \arguments{
 \item{param}{Name of parameter to load}
 
 \item{folder}{folder to find Posterior chunk files}
+
+\item{samples}{vector of sample indices to load. If NULL, all samples loaded}
 }
 \value{
 array with all chuncks of Posterior samples appended together

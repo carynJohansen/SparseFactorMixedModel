@@ -8,7 +8,8 @@ BSFG_control(sampler = c("fast_BSFG", "general_BSFG"),
   Posterior_folder = "Posterior", simulation = c(F, T), scale_Y = c(T, F),
   b0 = 1, b1 = 5e-04, epsilon = 0.1, prop = 1, k_init = 20,
   h2_divisions = 100, h2_step_size = NULL, drop0_tol = 1e-14,
-  K_eigen_tol = 1e-10, burn = 100, thin = 2)
+  K_eigen_tol = 1e-10, burn = 100, thin = 2,
+  delta_iteractions_factor = 100)
 }
 \arguments{
 \item{sampler}{specify the sampler to use. fast_BSFG is often faster, but only allows one random
@@ -31,6 +32,8 @@ considered "large", signifying a factor should be kept. See Bhattacharya and Dun
 
 \item{prop}{proportion of \eqn{\lambda{ij}} elements in a column of \eqn{\Lambda} that must be smaller than
 \code{epsilon} before factor is dropped. See Bhattacharya and Dunson 2011}
+
+\item{k_init}{initial number of factors}
 
 \item{h2_divisions}{A scalar or vector of length equal to number of random effects. In BSFG, random
 effects are re-scaled as percentages of the total variation. Then a discrete prior spanning [0,1)
@@ -58,7 +61,7 @@ untransformed.}
 
 \item{thin}{thinning rate of the MCMC chain}
 
-\item{kinit}{initial number of factors}
+\item{delta_iteractions_factor}{Number of times to iterate through sample_delta per iteration of the other parameters}
 }
 \description{
 Function to create run_parameters list for initializing BSFG model

@@ -1,4 +1,5 @@
 exportPattern("^[[:alpha:]]+")
+import(methods,Rcpp)
 importFrom(Rcpp, evalCpp)
 importFrom(RcppParallel, RcppParallelLibs)
 import(Matrix)
@@ -9,4 +10,13 @@ importFrom(parallel,mclapply)
 importFrom(parallel,detectCores)
 importFrom(abind,abind)
 importFrom(reshape2,melt)
-useDynLib(BSFG)
+importFrom(coda,HPDinterval)
+importFrom(coda,mcmc)
+importFrom("grDevices", "dev.list", "dev.new", "dev.off", "dev.set",
+           "pdf")
+importFrom("graphics", "abline", "arrows", "axis", "barplot", "hist",
+           "lines", "par", "plot", "points")
+importFrom("methods", "as", "is", "new")
+importFrom("stats", "cor", "model.matrix", "poly", "rgamma", "rnorm",
+           "runif", "var")
+useDynLib(BSFG,.registration=TRUE)

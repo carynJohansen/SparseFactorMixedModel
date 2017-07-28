@@ -6,15 +6,13 @@
 using namespace Eigen;
 using namespace RcppParallel;
 
-
-
 // -------------------------------------------- //
 // ---------- sample_MME_fixedEffects --------- //
 // -------------------------------------------- //
 
 VectorXd sample_MME_single_diagK(
     VectorXd y,
-    MatrixXd W,
+    SpMat W,
     VectorXd prior_mean,
     VectorXd prior_prec,
     SpMat chol_R,
@@ -29,7 +27,8 @@ VectorXd sample_MME_single_diagK(
   MatrixXd W_theta_star = W * theta_star;
   VectorXd y_resid = y - W_theta_star - e_star;
 
-  MatrixXd RinvSqW = chol_R.transpose().triangularView<Lower>().solve(W);
+  MatrixXd W_mat = W;
+  MatrixXd RinvSqW = chol_R.transpose().triangularView<Lower>().solve(W_mat);
   VectorXd WtRinvy = RinvSqW.transpose() * chol_R.transpose().triangularView<Lower>().solve(y_resid) * tot_Eta_prec;
 
   VectorXd theta_tilda;
@@ -55,7 +54,7 @@ VectorXd sample_MME_single_diagK(
 // [[Rcpp::export]]
 VectorXd sample_MME_single_diagK_c(
     Map<VectorXd> y,
-    Map<MatrixXd> W,
+    MSpMat W,
     Map<VectorXd> prior_mean,
     Map<VectorXd> prior_prec,
     MSpMat chol_R,
@@ -69,7 +68,7 @@ VectorXd sample_MME_single_diagK_c(
 // [[Rcpp::export()]]
 MatrixXd sample_MME_fixedEffects_c(
     Map<MatrixXd> Y,
-    Map<MatrixXd> W,
+    MSpMat W,
     Rcpp::List Sigma_Choleskys,
     Rcpp::IntegerVector h2s_index,
     Map<VectorXd> tot_Eta_prec,
@@ -80,14 +79,16 @@ MatrixXd sample_MME_fixedEffects_c(
     int grainSize) {
 
   struct sampleColumn : public Worker {
-    MatrixXd Y, W, prior_mean, prior_prec, randn_theta, randn_e;
+    MatrixXd Y;
+    SpMat W;
+    MatrixXd prior_mean, prior_prec, randn_theta, randn_e;
     const std::vector<MSpMat> chol_R_list;
     RVector<int> h2s_index;
     VectorXd tot_Eta_prec;
     MatrixXd &coefs;
 
     sampleColumn(MatrixXd Y,
-                 MatrixXd W,
+                 SpMat W,
                  MatrixXd prior_mean,
                  MatrixXd prior_prec,
                  const std::vector<MSpMat> chol_R_list,
@@ -124,8 +125,107 @@ MatrixXd sample_MME_fixedEffects_c(
   return(coefs);
 }
 
+// [[Rcpp::export()]]
+Rcpp::List sample_MME_fixedEffects_cis_c(
+    Map<MatrixXd> Y,
+    Map<MatrixXd> W,
+    Rcpp::List cis_genotypes,
+    Rcpp::List Sigma_Choleskys,
+    Rcpp::IntegerVector h2s_index,
+    Map<VectorXd> tot_Eta_prec,
+    Map<MatrixXd> prior_mean,
+    Map<MatrixXd> prior_prec,
+    Map<MatrixXd> randn_theta,
+    Map<MatrixXd> randn_e,
+    Map<VectorXd> randn_cis,
+    Map<VectorXd> cis_effect_index,
+    int grainSize) {
 
+  int b = randn_theta.rows();
+  int p = randn_theta.cols();
 
+  std::vector<MSpMat> chol_R_list;
+  for(int i = 0; i < max(h2s_index); i++){
+    Rcpp::List Sigma_Choleskys_i = Rcpp::as<Rcpp::List>(Sigma_Choleskys[i]);
+    chol_R_list.push_back(Rcpp::as<MSpMat>(Sigma_Choleskys_i["chol_Sigma"]));
+  }
+
+  std::vector<MatrixXd> cis_X;
+  int length_cis = 0;
+  for(int i = 0; i < p; i++){
+    MatrixXd cXi = Rcpp::as<MatrixXd>(cis_genotypes[i]);
+    cis_X.push_back(cXi);
+    length_cis += cXi.cols();
+  }
+
+  MatrixXd coefs(b,p);
+  VectorXd cis_effects(length_cis);
+
+  struct sampleColumn : public Worker {
+    MatrixXd Y;
+    MatrixXd W;
+    std::vector<MatrixXd> cis_X;
+    MatrixXd prior_mean, prior_prec, randn_theta, randn_e;
+    VectorXd randn_cis;
+    const std::vector<MSpMat> chol_R_list;
+    RVector<int> h2s_index;
+    VectorXd cis_effect_index;
+    VectorXd tot_Eta_prec;
+    MatrixXd &coefs;
+    VectorXd &cis_effects;
+
+    sampleColumn(MatrixXd Y,
+                 MatrixXd W,
+                 std::vector<MatrixXd> cis_X,
+                 MatrixXd prior_mean,
+                 MatrixXd prior_prec,
+                 const std::vector<MSpMat> chol_R_list,
+                 const Rcpp::IntegerVector h2s_index,
+                 VectorXd cis_effect_index,
+                 VectorXd tot_Eta_prec,
+                 MatrixXd randn_theta,
+                 MatrixXd randn_e,
+                 VectorXd randn_cis,
+                 MatrixXd &coefs,
+                 VectorXd &cis_effects):
+      Y(Y), W(W), cis_X(cis_X),prior_mean(prior_mean), prior_prec(prior_prec),
+      randn_theta(randn_theta), randn_e(randn_e), randn_cis(randn_cis),
+      chol_R_list(chol_R_list), h2s_index(h2s_index), cis_effect_index(cis_effect_index),tot_Eta_prec(tot_Eta_prec),
+      coefs(coefs), cis_effects(cis_effects) {}
+
+    void operator()(std::size_t begin, std::size_t end) {
+      int n = W.rows();
+      int b = W.cols();
+      for(std::size_t j = begin; j < end; j++){
+        int h2_index = h2s_index[j] - 1;
+        SpMat chol_R = chol_R_list[h2_index];
+
+        int b_cis = cis_X[j].cols();
+        MatrixXd W_cisj(n,b+b_cis);
+        W_cisj << W, cis_X[j];
+
+        VectorXd prior_mean_j = VectorXd::Zero(b+b_cis);
+        prior_mean_j.head(b) = prior_mean.col(j);
+
+        VectorXd prior_prec_j = VectorXd::Constant(b+b_cis,1e-10);
+        prior_prec_j.head(b) = prior_prec.col(j);
+
+        VectorXd randn_theta_j(b+b_cis);
+        randn_theta_j.head(b) = randn_theta.col(j);
+        randn_theta_j.tail(b_cis) = randn_cis.segment(cis_effect_index[j],b_cis);
+
+        VectorXd result = sample_MME_single_diagK(Y.col(j), W_cisj.sparseView(), prior_mean_j, prior_prec_j, chol_R, tot_Eta_prec[j], randn_theta_j,randn_e.col(j));
+        coefs.col(j) = result.head(b);
+        cis_effects.segment(cis_effect_index[j],b_cis) = result.tail(b_cis);
+      }
+    }
+  };
+
+  sampleColumn sampler(Y,W,cis_X,prior_mean,prior_prec,chol_R_list,h2s_index,cis_effect_index,tot_Eta_prec,randn_theta,randn_e, randn_cis,coefs,cis_effects);
+  RcppParallel::parallelFor(0,p,sampler,grainSize);
+
+  return(Rcpp::List::create(coefs,cis_effects));
+}
 // -------------------------------------------- //
 // ------------ sample_MME_ZKZts -------------- //
 // -------------------------------------------- //
@@ -233,7 +333,6 @@ MatrixXd sample_MME_ZKZts_c(
   RcppParallel::parallelFor(0,p,sampler,grainSize);
   return(coefs);
 }
-
 
 // -------------------------------------------- //
 // -------------- tot_prec_scores ------------- //
@@ -415,12 +514,13 @@ double log_prob_h2_c(
   return log_p;
 }
 
+// [[Rcpp::export()]]
 VectorXd find_candidate_states(
-    ArrayXXd h2s_matrix,
+    MatrixXd h2s_matrix,
     double step_size,
     int old_state
 ) {
-  VectorXd dists = (h2s_matrix.colwise() - h2s_matrix.col(old_state)).abs().matrix().colwise().sum();
+  VectorXd dists = (h2s_matrix.colwise() - h2s_matrix.col(old_state)).cwiseAbs().colwise().sum();
   VectorXd indices(dists.size());
   int count = 0;
   for(int i = 0; i < dists.size(); i++){
@@ -439,14 +539,15 @@ VectorXd find_candidate_states(
 }
 
 // [[Rcpp::export()]]
-Rcpp::IntegerVector sample_h2s_discrete_MH_c(
+VectorXi sample_h2s_discrete_MH_c(
     Map<MatrixXd> Y,
     Map<VectorXd> tot_Eta_prec,
     Map<VectorXd> discrete_priors,
-    Rcpp::IntegerVector h2_index,
+    VectorXi h2_index,
     Map<MatrixXd> h2s_matrix,
     Rcpp::List Sigma_Choleskys,
     Map<VectorXd> r_draws,
+    Map<VectorXd> state_draws,
     double step_size,
     int grainSize
 ){
@@ -459,10 +560,10 @@ Rcpp::IntegerVector sample_h2s_discrete_MH_c(
     const VectorXd tot_Eta_prec;
     const VectorXd discrete_priors;
     const VectorXd r_draws;
-    const RVector<int> h2_index;
-    const RVector<double> state_draws;
+    const VectorXd state_draws;
+    const VectorXi h2_index;
     const double step_size;
-    RVector<int> new_index;
+    VectorXi &new_index;
 
     sampleColumn(const MatrixXd Y,
                  const MatrixXd h2s_matrix,
@@ -471,15 +572,15 @@ Rcpp::IntegerVector sample_h2s_discrete_MH_c(
                  const VectorXd tot_Eta_prec,
                  const VectorXd discrete_priors,
                  const VectorXd r_draws,
-                 const Rcpp::IntegerVector h2_index,
-                 const Rcpp::NumericVector state_draws,
+                 const VectorXd state_draws,
+                 const VectorXi h2_index,
                  const double step_size,
-                 Rcpp::IntegerVector new_index):
+                 VectorXi &new_index):
 
       Y(Y), h2s_matrix(h2s_matrix),
       chol_Sigma_list(chol_Sigma_list), log_det_Sigmas(log_det_Sigmas),
       tot_Eta_prec(tot_Eta_prec),  discrete_priors(discrete_priors),
-      r_draws(r_draws),h2_index(h2_index),state_draws(state_draws),step_size(step_size),new_index(new_index) {}
+      r_draws(r_draws),state_draws(state_draws),h2_index(h2_index),step_size(step_size),new_index(new_index) {}
 
     void operator()(std::size_t begin, std::size_t end) {
       int n = Y.rows();
@@ -521,10 +622,9 @@ Rcpp::IntegerVector sample_h2s_discrete_MH_c(
     log_det_Sigmas[i] = Rcpp::as<double>(Sigma_Choleskys_i["log_det"]);
   }
 
-  Rcpp::IntegerVector new_index(p);
-  Rcpp::NumericVector state_draws = Rcpp::runif(p);
+  VectorXi new_index(p);
 
-  sampleColumn sampler(Y,h2s_matrix,chol_Sigma_list,log_det_Sigmas,tot_Eta_prec,discrete_priors,r_draws,h2_index,state_draws,step_size,new_index);
+  sampleColumn sampler(Y,h2s_matrix,chol_Sigma_list,log_det_Sigmas,tot_Eta_prec,discrete_priors,r_draws,state_draws,h2_index,step_size,new_index);
   RcppParallel::parallelFor(0,p,sampler,grainSize);
   return new_index;
 }

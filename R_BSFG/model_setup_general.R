@@ -44,7 +44,6 @@ priors = list(
   h2_priors_factors = 1
 )
 
-
 print('Initializing')
 
 BSFG_state = BSFG_init(Y, model=~1 + (1|Line),data,factor_model_fixed = NULL,priors=priors,run_parameters=run_parameters,K_mats = list(Line = K))
